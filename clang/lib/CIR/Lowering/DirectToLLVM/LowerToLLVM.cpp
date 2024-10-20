@@ -1139,7 +1139,10 @@ struct ConvertCIRToLLVMPass
   }
   void runOnOperation() final;
 
-  void buildGlobalAnnotationsVar();
+  void buildGlobalAnnotationsVar(
+      llvm::StringMap<mlir::LLVM::GlobalOp> &stringGlobalsMap,
+      llvm::StringMap<mlir::LLVM::GlobalOp> &argStringGlobalsMap,
+      llvm::MapVector<mlir::ArrayAttr, mlir::LLVM::GlobalOp> &argsVarMap);
 
   virtual StringRef getArgument() const override { return "cir-flat-to-llvm"; }
 };
@@ -4419,7 +4422,10 @@ void collect_unreachable(mlir::Operation *parent,
   }
 }
 
-void ConvertCIRToLLVMPass::buildGlobalAnnotationsVar() {
+void ConvertCIRToLLVMPass::buildGlobalAnnotationsVar(
+    llvm::StringMap<mlir::LLVM::GlobalOp> &stringGlobalsMap,
+    llvm::StringMap<mlir::LLVM::GlobalOp> &argStringGlobalsMap,
+    llvm::MapVector<mlir::ArrayAttr, mlir::LLVM::GlobalOp> &argsVarMap) {
   mlir::ModuleOp module = getOperation();
   mlir::Attribute attr = module->getAttr("cir.global_annotations");
   if (!attr)
@@ -4466,14 +4472,6 @@ void ConvertCIRToLLVMPass::buildGlobalAnnotationsVar() {
 
     mlir::Value result = varInitBuilder.create<mlir::LLVM::UndefOp>(
         moduleLoc, annoStructArrayTy);
-    // Track globals created for annotation related strings
-    llvm::StringMap<mlir::LLVM::GlobalOp> stringGlobalsMap;
-    // Track globals created for annotation arg related strings.
-    // They are different from annotation strings, as strings used in args
-    // are not in llvmMetadataSectionName, and also has aligment 1.
-    llvm::StringMap<mlir::LLVM::GlobalOp> argStringGlobalsMap;
-    // Track globals created for annotation args.
-    llvm::MapVector<mlir::ArrayAttr, mlir::LLVM::GlobalOp> argsVarMap;
 
     int idx = 0;
     for (mlir::Attribute entry : annotationValuesArray) {
@@ -4518,6 +4516,15 @@ void ConvertCIRToLLVMPass::runOnOperation() {
   prepareTypeConverter(converter, dataLayout, lowerModule.get());
 
   mlir::RewritePatternSet patterns(&getContext());
+
+  // Track globals created for annotation related strings
+  llvm::StringMap<mlir::LLVM::GlobalOp> stringGlobalsMap;
+  // Track globals created for annotation arg related strings.
+  // They are different from annotation strings, as strings used in args
+  // are not in llvmMetadataSectionName, and also has aligment 1.
+  llvm::StringMap<mlir::LLVM::GlobalOp> argStringGlobalsMap;
+  // Track globals created for annotation args.
+  llvm::MapVector<mlir::ArrayAttr, mlir::LLVM::GlobalOp> argsVarMap;
 
   populateCIRToLLVMConversionPatterns(patterns, converter, dataLayout);
   mlir::populateFuncToLLVMConversionPatterns(converter, patterns);
@@ -4575,7 +4582,7 @@ void ConvertCIRToLLVMPass::runOnOperation() {
         auto dtorAttr = mlir::cast<mlir::cir::GlobalDtorAttr>(attr);
         return std::make_pair(dtorAttr.getName(), dtorAttr.getPriority());
       });
-  buildGlobalAnnotationsVar();
+  buildGlobalAnnotationsVar(stringGlobalsMap, argStringGlobalsMap, argsVarMap);
 }
 
 std::unique_ptr<mlir::Pass> createConvertCIRToLLVMPass() {
